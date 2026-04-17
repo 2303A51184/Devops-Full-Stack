@@ -1,120 +1,119 @@
-// src/App.jsx
-import React, { useEffect, useState } from "react";
-import { Routes, Route, useLocation } from "react-router-dom";
+import React from "react";
+import { Routes, Route } from "react-router-dom";
+import { useUser } from "@clerk/clerk-react";
+import { Link } from "react-router-dom";
 
-// Pages
+// Import your pages
 import Home from "./pages/Home/Home";
-import Doctors from "./pages/Doctors/Doctors";
-import Contact from "./pages/Contact/Contact";
-import Service from "./pages/Service/Service";
-import DoctorDetail from "./pages/DoctorDetail/DoctorDetail";
-import ServiceDetailPage from "./pages/ServiceDetailPage/ServiceDetailPage";
-import Appointments from "./pages/Appointments/Appointments";
-import Login from "./pages/Login/Login";
-
-// Doctor Admin
-import DHome from "./pages/DHome/DHome";
+import Add from "./pages/Add/Add";
 import List from "./pages/List/List";
-import EditProfile from "./pages/EditProfile/EditProfile";
+import Appointments from "./pages/Appointments/Appointments";
+import SerDashboard from "./pages/SerDashboard/SerDashboard";
+import AddSer from "./pages/AddSer/AddSer";
+import ListService from "./pages/ListService/ListService";
+import ServiceAppointments from "./pages/ServiceAppointments/ServiceAppointments";
+import Hero from "./components/Hero/Hero";
 
-// Lucide icon
-import { CircleChevronUp } from "lucide-react";
-import VerifyPaymentPage from "../VerifyPaymetPage";
-import VerifyServicePaymentPage from "../VerifyServicePaymentPage";
+function RequireAuth({ children }) {
+  const { isLoaded, isSignedIn } = useUser();
 
-/* ================= Scroll To Top ================= */
-const ScrollToTop = () => {
-  const { pathname } = useLocation();
+  if (!isLoaded) return null; // prevent flicker
+  if (!isSignedIn)
+    return (
+      <div className="min-h-screen font-mono flex items-center justify-center bg-linear-to-b from-emerald-50 via-green-50 to-emerald-100 px-4">
+        <div className="text-center">
+          {/* Animated text */}
+          <p className="text-emerald-800 font-semibold text-lg sm:text-2xl mb-4 animate-fade-in">
+            Please sign in to view this page
+          </p>
 
-  useEffect(() => {
-    window.scrollTo(0, 0);
-    document.documentElement.scrollTop = 0;
-    document.body.scrollTop = 0;
-  }, [pathname]);
-
-  return null;
-};
-
-/* ================= Floating Scroll Button ================= */
-const ScrollButton = () => {
-  const [visible, setVisible] = useState(false);
-
-  useEffect(() => {
-    const handleScroll = () => setVisible(window.scrollY > 200);
-    window.addEventListener("scroll", handleScroll, { passive: true });
-
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, []);
-
-  const scrollTop = () => window.scrollTo({ top: 0, behavior: "smooth" });
-
-  return (
-    <button
-      onClick={scrollTop}
-      className={`fixed right-4 bottom-6 z-50 w-11 h-11 rounded-full flex items-center justify-center 
-      bg-emerald-600 text-white shadow-lg transition-all duration-300 
-      ${visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"} 
-      hover:scale-110 hover:shadow-xl`}
-      title="Go to top"
-    >
-      <CircleChevronUp size={22} />
-    </button>
-  );
-};
-
-/* ================= Main App ================= */
-const App = () => {
-  // Lock horizontal overflow globally
-  useEffect(() => {
-    document.body.style.overflowX = "hidden";
-    document.documentElement.style.overflowX = "hidden";
-    return () => {
-      document.body.style.overflowX = "auto";
-      document.documentElement.style.overflowX = "auto";
-    };
-  }, []);
-
-  return (
-    <>
-      <ScrollToTop />
-
-      <div className="overflow-x-hidden bg-white text-gray-900">
-        <Routes>
-          {/* Public */}
-          <Route path="/" element={<Home />} />
-          <Route path="/doctors" element={<Doctors />} />
-          <Route path="/doctors/:id" element={<DoctorDetail />} />
-          <Route path="/contact" element={<Contact />} />
-          <Route path="/services" element={<Service />} />
-          <Route path="/services/:id" element={<ServiceDetailPage />} />
-          <Route path="/appointments" element={<Appointments />} />
-          <Route path="/doctor-admin/login" element={<Login />} />
-
-          {/* ✅ STRIPE PAYMENT ROUTES */}
-          <Route path="/appointment/success" element={<VerifyPaymentPage />} />
-          <Route path="/appointment/cancel" element={<VerifyPaymentPage />} />
-
-          <Route
-            path="/service-appointment/success"
-            element={<VerifyServicePaymentPage />}
-          />
-          <Route
-            path="/service-appointment/cancel"
-            element={<VerifyServicePaymentPage />}
-          />
-
-          {/* Doctor Admin */}
-          <Route path="/doctor-admin/:id" element={<DHome />} />
-          <Route path="/doctor-admin/:id/appointments" element={<List />} />
-          <Route
-            path="/doctor-admin/:id/profile/edit"
-            element={<EditProfile />}
-          />
-        </Routes>
+          {/* Button on new line */}
+          <div className="flex justify-center">
+            <Link
+              to="/"
+              className="px-4 py-2 text-sm rounded-full bg-emerald-600 text-white shadow-sm
+                       hover:bg-emerald-700 hover:shadow-md
+                       transition-all duration-300 ease-in-out
+                       animate-bounce-subtle"
+            >
+              HOME
+            </Link>
+          </div>
+        </div>
       </div>
+    );
+  return children;
+}
 
-      <ScrollButton />
-    </>
+const App = () => {
+  return (
+    <Routes>
+      <Route path="/" element={<Hero />} />
+      <Route
+        path="/h"
+        element={
+          <RequireAuth>
+            <Home />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/add"
+        element={
+          <RequireAuth>
+            <Add />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/list"
+        element={
+          <RequireAuth>
+            <List />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/appointments"
+        element={
+          <RequireAuth>
+            <Appointments />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/service-dashboard"
+        element={
+          <RequireAuth>
+            <SerDashboard />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/add-service"
+        element={
+          <RequireAuth>
+            <AddSer />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/list-service"
+        element={
+          <RequireAuth>
+            <ListService />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/service-appointments"
+        element={
+          <RequireAuth>
+            <ServiceAppointments />
+          </RequireAuth>
+        }
+      />
+    </Routes>
   );
 };
 
