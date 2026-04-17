@@ -1,621 +1,484 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { Search, X, Phone, Calendar } from "lucide-react";
-import { useParams } from "react-router-dom";
-import { listPageStyles } from "../../assets/dummyStyles";
+// src/components/AnimatedDoctorList.responsive.jsx
+import React, { useMemo, useState, useEffect } from "react";
+import {
+  Star,
+  BadgeIndianRupee,
+  Trash2,
+  Search,
+  Users,
+  EyeClosed,
+} from "lucide-react";
+import { doctorListStyles } from "../../assets/dummyStyles";
 
-const API_BASE = "http://localhost:4000";
-
-/* -------------------------
-   Utils
-------------------------- */
-function parseDateTime(date, time) {
-  return new Date(`${date}T${time}:00`);
-}
-
-function formatTimeAMPM(time24) {
-  if (!time24) return "";
-  const [hh, mm] = time24.split(":");
-  let h = parseInt(hh, 10);
-  const ampm = h >= 12 ? "PM" : "AM";
-  h = h % 12 || 12;
-  return `${h}:${mm} ${ampm}`;
-}
-
-function formatDate(dateStr) {
-  if (!dateStr) return "";
-  const d = new Date(`${dateStr}T00:00:00`);
-  return d.toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-}
-
-function to24HourFromMaybe12(timeStr) {
-  // Accepts "09:30 AM", "9:30 PM" or "09:30"
-  if (!timeStr) return "00:00";
-  const m = timeStr.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
-  if (!m) return timeStr;
-  let hh = Number(m[1]);
-  const mm = m[2];
-  const ampm = m[3];
-  if (!ampm) return `${String(hh).padStart(2, "0")}:${mm}`;
-  const up = ampm.toUpperCase();
-  if (up === "AM") {
-    if (hh === 12) hh = 0;
-  } else {
-    if (hh !== 12) hh += 12;
-  }
-  return `${String(hh).padStart(2, "0")}:${mm}`;
-}
-
-function to12HourFrom24(hhmm) {
-  if (!hhmm) return "12:00 AM";
-  const [hh, mm] = hhmm.split(":").map(Number);
-  const ampm = hh >= 12 ? "PM" : "AM";
-  const h12 = hh % 12 === 0 ? 12 : hh % 12;
-  return `${String(h12)}:${String(mm).padStart(2, "0")} ${ampm}`;
-}
-
-function backendToFrontendStatus(s) {
-  if (!s) return "pending";
-  const v = String(s).toLowerCase();
-  if (v === "pending") return "pending";
-  if (v === "confirmed") return "confirmed";
-  if (v === "completed" || v === "complete") return "complete";
-  if (v === "canceled" || v === "cancelled") return "cancelled";
-  if (v === "rescheduled") return "rescheduled";
-  return v;
-}
-
-function frontendToBackendStatus(fs) {
-  if (!fs) return "Pending";
-  const v = String(fs).toLowerCase();
-  if (v === "pending") return "Pending";
-  if (v === "confirmed") return "Confirmed";
-  if (v === "complete") return "Completed";
-  if (v === "cancelled") return "Canceled";
-  if (v === "rescheduled") return "Rescheduled";
-  return fs;
-}
-
-/* -------------------------
-   Normalizer: adapt backend shape to UI shape used here
-------------------------- */
-function normalizeAppointment(a) {
-  if (!a) return null;
-  const id = a._id || a.id || String(Math.random()).slice(2);
-  const patient = a.patientName || a.patient || a.name || "Unknown";
-  const age = a.age ?? a.patientAge ?? "";
-  const gender = a.gender || "";
-  const doctorName =
-    (a.doctorId && a.doctorId.name) || a.doctorName || a.doctor || "";
-  const doctorImage =
-    (a.doctorId && (a.doctorId.imageUrl || a.doctorId.image)) ||
-    a.doctorImage ||
-    a.doctorImageUrl ||
-    "";
-  const speciality =
-    (a.doctorId && (a.doctorId.specialization || a.doctorId.speciality)) ||
-    a.speciality ||
-    a.specialization ||
-    "";
-  const mobile = a.mobile || a.phone || "";
-  const fee = Number(a.fees ?? a.fee ?? a.payment?.amount ?? 0) || 0;
-  const date = a.date || (a.slot && a.slot.date) || "";
-  const rawTime =
-    a.time ||
-    (a.slot && a.slot.time) ||
-    (a.hour != null
-      ? `${String(a.hour).padStart(2, "0")}:${String(a.minute || 0).padStart(
-          2,
-          "0",
-        )}`
-      : "");
-  const time = to24HourFromMaybe12(rawTime);
-  const status = backendToFrontendStatus(
-    a.status || a.payment?.status || "pending",
-  );
-  return {
-    id,
-    patient,
-    age,
-    gender,
-    doctorName,
-    doctorImage,
-    speciality,
-    mobile,
-    date,
-    time,
-    fee,
-    status,
-    raw: a,
-  };
-}
-
-/* ================= StatusBadge ================= */
-function StatusBadge({ status }) {
-  const base = listPageStyles.statusBadgeBase;
-  if (status === "complete")
-    return (
-      <span className={`${base} ${listPageStyles.statusBadgeComplete}`}>
-        Completed
-      </span>
-    );
-  if (status === "cancelled")
-    return (
-      <span className={`${base} ${listPageStyles.statusBadgeCancelled}`}>
-        Cancelled
-      </span>
-    );
-  if (status === "confirmed")
-    return (
-      <span className={`${base} ${listPageStyles.statusBadgeConfirmed}`}>
-        Confirmed
-      </span>
-    );
-  if (status === "rescheduled")
-    return (
-      <span className={`${base} ${listPageStyles.statusBadgeRescheduled}`}>
-        Rescheduled
-      </span>
-    );
-  return (
-    <span className={`${base} ${listPageStyles.statusBadgePending}`}>
-      Pending
-    </span>
-  );
-}
-
-/* ================= StatusSelect ================= */
-function StatusSelect({ appointment, onChange }) {
-  const terminal =
-    appointment.status === "complete" || appointment.status === "cancelled";
-
-  if (appointment.status === "rescheduled") {
-    return (
-      <select
-        value={appointment.status}
-        onChange={(e) => onChange(e.target.value)}
-        className={`${listPageStyles.statusSelect} ${
-          terminal
-            ? listPageStyles.statusSelectDisabled
-            : listPageStyles.statusSelectEnabled
-        }`}
-        title="After reschedule you can mark Completed or Cancelled"
-      >
-        <option value="rescheduled" disabled>
-          Rescheduled
-        </option>
-        <option value="complete">Completed</option>
-        <option value="cancelled">Cancelled</option>
-      </select>
-    );
-  }
-
-  const options = [
-    { value: "pending", label: "Pending" },
-    { value: "confirmed", label: "Confirmed" },
-    { value: "complete", label: "Completed" },
-    { value: "cancelled", label: "Cancelled" },
+function formatDateISO(iso) {
+  if (!iso || typeof iso !== "string") return iso;
+  const parts = iso.split("-");
+  if (parts.length !== 3) return iso;
+  const [y, m, d] = parts;
+  const dateObj = new Date(Number(y), Number(m) - 1, Number(d));
+  const monthNames = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "June",
+    "July",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
   ];
-
-  return (
-    <select
-      value={appointment.status}
-      onChange={(e) => onChange(e.target.value)}
-      disabled={terminal}
-      className={`${listPageStyles.statusSelect} ${
-        terminal
-          ? listPageStyles.statusSelectDisabled
-          : listPageStyles.statusSelectEnabled
-      }`}
-      title={terminal ? "Status cannot be changed" : "Change status"}
-    >
-      {options.map((opt) => (
-        <option key={opt.value} value={opt.value} className="text-sm">
-          {opt.label}
-        </option>
-      ))}
-    </select>
-  );
+  const day = String(Number(d));
+  const month = monthNames[dateObj.getMonth()] || "";
+  return `${day} ${month} ${y}`;
 }
 
-/* ================= RescheduleButton ================= */
-function RescheduleButton({ appointment, onReschedule }) {
-  const terminal =
-    appointment.status === "complete" || appointment.status === "cancelled";
-  const [editing, setEditing] = useState(false);
-  const [date, setDate] = useState(appointment.date || "");
-  const [time, setTime] = useState(appointment.time || "09:00");
+/* ---------- New helpers for normalized + sorted schedule keys ---------- */
 
-  // compute local today's date as YYYY-MM-DD
-  const minDate = useMemo(() => {
-    const d = new Date();
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return `${y}-${m}-${day}`;
+/**
+ * Normalize any date-like string / Date to YYYY-MM-DD or return null if invalid.
+ */
+function normalizeToDateString(d) {
+  if (!d) return null;
+  const dt = new Date(d);
+  if (Number.isNaN(dt.getTime())) return null;
+  return dt.toISOString().split("T")[0]; // YYYY-MM-DD
+}
+
+/**
+ * Build a normalized schedule map: { 'YYYY-MM-DD': [slot, slot2, ...], ... }
+ * - preserves array slots or converts non-arrays to []
+ */
+function buildScheduleMap(schedule) {
+  const map = {};
+  if (!schedule || typeof schedule !== "object") return map;
+  Object.entries(schedule).forEach(([k, v]) => {
+    const nd = normalizeToDateString(k) || String(k);
+    map[nd] = Array.isArray(v) ? v.slice() : [];
+  });
+  return map;
+}
+
+/**
+ * Given a schedule-like object (or array of date strings), return date keys ordered:
+ * - past dates first, nearest past → older past
+ * - then today & future, earliest → latest
+ */
+function getSortedScheduleDates(scheduleLike) {
+  // get keys from either a map object or array
+  let keys = [];
+  if (Array.isArray(scheduleLike)) {
+    keys = scheduleLike.map(normalizeToDateString).filter(Boolean);
+  } else if (scheduleLike && typeof scheduleLike === "object") {
+    keys = Object.keys(scheduleLike).map(normalizeToDateString).filter(Boolean);
+  }
+
+  // unique
+  keys = Array.from(new Set(keys));
+
+  const parsed = keys.map((ds) => ({ ds, date: new Date(ds) }));
+
+  const dateVal = (d) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+
+  const today = new Date();
+  const todayVal = dateVal(today);
+
+  const past = parsed
+    .filter((p) => dateVal(p.date) < todayVal)
+    .sort((a, b) => dateVal(b.date) - dateVal(a.date)); // nearest past first
+
+  const future = parsed
+    .filter((p) => dateVal(p.date) >= todayVal)
+    .sort((a, b) => dateVal(a.date) - dateVal(b.date)); // earliest first (includes today)
+
+  return [...past, ...future].map((p) => p.ds);
+}
+
+/* --------------------------------------------------------------------- */
+
+export default function AnimatedDoctorListResponsive({ apiBase }) {
+  const API_BASE = apiBase || "http://localhost:4000";
+
+  const [doctors, setDoctors] = useState([]);
+  const [expanded, setExpanded] = useState(null);
+  const [query, setQuery] = useState("");
+  const [showAll, setShowAll] = useState(false);
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [loading, setLoading] = useState(false);
+
+  // track if we are on a mobile (tailwind "sm" breakpoint is 640px)
+  const [isMobileScreen, setIsMobileScreen] = useState(false);
+  useEffect(() => {
+    function onResize() {
+      if (typeof window === "undefined") return;
+      setIsMobileScreen(window.innerWidth < 640);
+    }
+    onResize();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  useEffect(() => {
-    const apptRaw = appointment.date ? String(appointment.date) : "";
-    const apptDate = apptRaw.slice(0, 10); // safe for ISO or "YYYY-MM-DD"
-    // Use apptDate if it's today or future; otherwise fall back to minDate
-    setDate(apptDate && apptDate >= minDate ? apptDate : minDate);
-    setTime(appointment.time || "09:00");
-  }, [appointment.date, appointment.time, minDate]);
-
-  function save() {
-    if (!date || !time) return;
-    // defensive: never allow saving a date before today's local date
-    if (date < minDate) {
-      setDate(minDate);
-      return;
-    }
-    onReschedule(date, time); // time is "HH:MM" 24h
-    setEditing(false);
-  }
-
-  function cancel() {
-    const apptRaw = appointment.date ? String(appointment.date) : "";
-    const apptDate = apptRaw.slice(0, 10);
-    setDate(apptDate && apptDate >= minDate ? apptDate : minDate);
-    setTime(appointment.time || "09:00");
-    setEditing(false);
-  }
-
-  return (
-    <div className="w-full">
-      {!editing ? (
-        <div className="flex justify-end">
-          <button
-            onClick={() => setEditing(true)}
-            disabled={terminal}
-            title={
-              terminal ? "Cannot reschedule completed/cancelled" : "Reschedule"
-            }
-            className={`${listPageStyles.rescheduleButton} ${
-              terminal
-                ? listPageStyles.rescheduleButtonDisabled
-                : listPageStyles.rescheduleButtonEnabled
-            }`}
-          >
-            Reschedule
-          </button>
-        </div>
-      ) : (
-        <div className={listPageStyles.rescheduleForm}>
-          <input
-            type="date"
-            value={date}
-            min={minDate}
-            onChange={(e) => setDate(e.target.value)}
-            className={listPageStyles.dateInput}
-          />
-          <input
-            type="time"
-            value={time}
-            onChange={(e) => setTime(e.target.value)}
-            className={listPageStyles.timeInput}
-          />
-          <div className={listPageStyles.rescheduleButtons}>
-            <button onClick={save} className={listPageStyles.saveButton}>
-              Save
-            </button>
-            <button onClick={cancel} className={listPageStyles.cancelButton}>
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ================= Main Component ================= */
-export default function ListPage() {
-  const [appointments, setAppointments] = useState([]);
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const params = useParams();
-  const doctorId = params.id;
-
-  // load appointments
-  async function fetchAppointments() {
+  // fetch doctors from backend (robust to different response shapes)
+  async function fetchDoctors() {
     setLoading(true);
-    setError(null);
     try {
-      const url = `${API_BASE}/api/appointments/doctor/${encodeURIComponent(
-        doctorId,
-      )}`;
+      const res = await fetch(`${API_BASE}/api/doctors`);
+      const body = await res.json().catch(() => null);
 
-      const res = await fetch(url);
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(
-          body?.message || `Failed to fetch appointments (${res.status})`,
-        );
+      if (res.ok && body && body.success) {
+        // accept either body.data (new) or body.doctors (older)
+        const list = Array.isArray(body.data)
+          ? body.data
+          : Array.isArray(body.doctors)
+          ? body.doctors
+          : [];
+
+        // normalize schedule to plain object and ensure keys normalized
+        const normalized = list.map((d) => {
+          const scheduleMap = buildScheduleMap(d.schedule || {});
+          return {
+            ...d,
+            schedule: scheduleMap,
+          };
+        });
+        setDoctors(normalized);
+      } else {
+        console.error("Failed to fetch doctors", { status: res.status, body });
+        setDoctors([]);
       }
-      const body = await res.json();
-      const list = Array.isArray(body.appointments)
-        ? body.appointments
-        : Array.isArray(body)
-          ? body
-          : (body.items ?? body.data ?? []);
-      const normalized = (Array.isArray(list) ? list : [])
-        .map(normalizeAppointment)
-        .filter(Boolean);
-      setAppointments(normalized);
     } catch (err) {
-      console.error("fetchAppointments:", err);
-      setError(err.message || "Failed to load appointments");
-      setAppointments([]);
+      console.error("Network error fetching doctors", err);
+      setDoctors([]);
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    fetchAppointments();
+    fetchDoctors();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // optimistic status update -> PUT /api/appointments/:id { status }
-  async function updateStatusRemote(id, newStatus) {
-    const appt = appointments.find((p) => p.id === id);
-    if (!appt) return;
-    if (appt.status === "complete" || appt.status === "cancelled") return;
-
-    const backendStatus = frontendToBackendStatus(newStatus);
-
-    // optimistic
-    setAppointments((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, status: newStatus } : p)),
-    );
-
-    try {
-      const res = await fetch(`${API_BASE}/api/appointments/${id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: backendStatus }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(
-          body?.message || `Status update failed (${res.status})`,
-        );
-      }
-      const body = await res.json();
-      const updated = body.appointment || body;
-      setAppointments((prev) =>
-        prev.map((p) =>
-          p.id === id
-            ? normalizeAppointment(updated) || {
-                ...p,
-                status: backendToFrontendStatus(
-                  updated.status || backendStatus,
-                ),
-              }
-            : p,
-        ),
-      );
-    } catch (err) {
-      console.error("updateStatusRemote:", err);
-      // revert
-      setAppointments((prev) =>
-        prev.map((p) => (p.id === id ? { ...p, status: appt.status } : p)),
-      );
-      setError(err.message || "Failed to update status");
-    }
-  }
-
-  // optimistic reschedule -> PUT /api/appointments/:id { date, time }
-  async function rescheduleRemote(id, newDate, newTime24) {
-    const appt = appointments.find((p) => p.id === id);
-    if (!appt) return;
-    if (appt.status === "complete" || appt.status === "cancelled") return;
-
-    const time12 = to12HourFrom24(newTime24);
-
-    // optimistic
-    setAppointments((prev) =>
-      prev.map((p) =>
-        p.id === id
-          ? { ...p, date: newDate, time: newTime24, status: "rescheduled" }
-          : p,
-      ),
-    );
-
-    try {
-      const res = await fetch(`${API_BASE}/api/appointments/${id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date: newDate, time: time12 }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body?.message || `Reschedule failed (${res.status})`);
-      }
-      const body = await res.json();
-      const updated = body.appointment || body;
-      setAppointments((prev) =>
-        prev.map((p) =>
-          p.id === id
-            ? normalizeAppointment(updated) || {
-                ...p,
-                date: newDate,
-                time: newTime24,
-                status: backendToFrontendStatus(
-                  updated.status || "Rescheduled",
-                ),
-              }
-            : p,
-        ),
-      );
-    } catch (err) {
-      console.error("rescheduleRemote:", err);
-      setError(err.message || "Failed to reschedule — reloading");
-      await fetchAppointments();
-    }
-  }
-
-  // public wrappers (keeps original UI function names)
-  function updateStatus(id, newStatus) {
-    updateStatusRemote(id, newStatus);
-  }
-
-  function updateDateTime(id, newDate, newTime) {
-    rescheduleRemote(id, newDate, newTime);
-  }
-
   const filtered = useMemo(() => {
-    return [...appointments]
-      .filter((a) =>
-        search
-          ? (a.patient || "").toLowerCase().includes(search.toLowerCase())
-          : true,
-      )
-      .filter((a) => (statusFilter ? a.status === statusFilter : true))
-      .sort(
-        (a, b) => parseDateTime(b.date, b.time) - parseDateTime(a.date, a.time),
+    const q = query.trim().toLowerCase();
+    let list = doctors;
+    if (filterStatus === "available") {
+      list = list.filter(
+        (d) => (d.availability || "").toString().toLowerCase() === "available"
       );
-  }, [appointments, search, statusFilter]);
+    } else if (filterStatus === "unavailable") {
+      list = list.filter(
+        (d) => (d.availability || "").toString().toLowerCase() !== "available"
+      );
+    }
+    if (!q) return list;
+    return list.filter((d) => {
+      return (
+        (d.name || "").toLowerCase().includes(q) ||
+        (d.specialization || "").toLowerCase().includes(q)
+      );
+    });
+  }, [doctors, query, filterStatus]);
+
+  const displayed = useMemo(() => {
+    if (showAll) return filtered;
+    return filtered.slice(0, 6);
+  }, [filtered, showAll]);
+
+  function toggle(id) {
+    setExpanded((prev) => (prev === id ? null : id));
+  }
+
+  // delete doctor (calls backend)
+  async function removeDoctor(id) {
+    const doc = doctors.find((d) => (d._id || d.id) === id);
+    if (!doc) return;
+    const ok = window.confirm(`Delete ${doc.name}? This cannot be undone.`);
+    if (!ok) return;
+
+    try {
+      const res = await fetch(`${API_BASE}/api/doctors/${id}`, {
+        method: "DELETE",
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        alert(body?.message || "Failed to delete");
+        return;
+      }
+      // remove locally
+      setDoctors((prev) => prev.filter((p) => (p._id || p.id) !== id));
+      if (expanded === id) setExpanded(null);
+    } catch (err) {
+      console.error("delete error", err);
+      alert("Network error deleting doctor");
+    }
+  }
+
+  function applyStatusFilter(status) {
+    setFilterStatus((prev) => (prev === status ? "all" : status));
+    setExpanded(null);
+    setShowAll(false);
+  }
 
   return (
-    <div className={listPageStyles.pageContainer}>
-      <div className={listPageStyles.contentWrapper}>
-        <div className={listPageStyles.headerContainer}>
-          <div>
-            <h1 className={listPageStyles.headerTitle}>All Appointments</h1>
-            <p className={listPageStyles.headerSubtitle}>
-              Latest at top — search by patient name
-            </p>
+    <div className={doctorListStyles.container}>
+      <header className={doctorListStyles.headerContainer}>
+        <div className={doctorListStyles.headerTopSection}>
+          <div className={doctorListStyles.headerIconContainer}>
+            <div className={doctorListStyles.headerIcon}>
+              <Users size={20} className={doctorListStyles.headerIconSvg} />
+            </div>
+            <div>
+              <h1 className={doctorListStyles.headerTitle}>Find a Doctor</h1>
+              <p className={doctorListStyles.headerSubtitle}>
+                Search by name or specialization
+              </p>
+            </div>
           </div>
 
-          <div className={listPageStyles.searchFilterContainer}>
-            <div className={listPageStyles.searchContainer}>
-              <div className={listPageStyles.searchIconContainer}>
-                <Search className={listPageStyles.searchIcon} />
-              </div>
+          <div className={doctorListStyles.headerSearchContainer}>
+            <div className={doctorListStyles.searchBox}>
+              <Search size={16} className={doctorListStyles.searchIcon} />
               <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search patient name"
-                className={listPageStyles.searchInput}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search doctors, specialization"
+                className={doctorListStyles.searchInput}
               />
-              {search && (
-                <button
-                  onClick={() => setSearch("")}
-                  className={listPageStyles.clearSearchButton}
-                >
-                  <X className={listPageStyles.clearSearchIcon} />
-                </button>
-              )}
             </div>
 
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className={listPageStyles.statusFilter}
-              title="Filter by status"
+            <button
+              onClick={() => {
+                setQuery("");
+                setExpanded(null);
+                setShowAll(false);
+                setFilterStatus("all");
+              }}
+              className={doctorListStyles.clearButton}
             >
-              <option value="">All</option>
-              <option value="complete">Completed</option>
-              <option value="cancelled">Cancelled</option>
-              <option value="rescheduled">Rescheduled</option>
-            </select>
+              Clear
+            </button>
           </div>
         </div>
 
-        {loading ? (
-          <div className={listPageStyles.loadingContainer}>
-            Loading appointments…
-          </div>
-        ) : error ? (
-          <div className={listPageStyles.errorContainer}>Error: {error}</div>
-        ) : (
-          <div className={listPageStyles.appointmentsGrid}>
-            {filtered.map((a) => (
-              <article key={a.id} className={listPageStyles.appointmentCard}>
-                <header className={listPageStyles.cardHeader}>
-                  <div className={listPageStyles.cardAvatar}>
-                    {a.doctorImage ? (
-                      <img
-                        src={a.doctorImage}
-                        alt={a.doctorName}
-                        onError={(e) =>
-                          (e.currentTarget.style.display = "none")
-                        }
-                        className={listPageStyles.cardAvatarImage}
-                      />
-                    ) : (
-                      <div className={listPageStyles.cardAvatarFallback}>
-                        {(a.doctorName || "D").charAt(0)}
-                      </div>
-                    )}
-                  </div>
+        <div className={doctorListStyles.filterContainer}>
+          <button
+            onClick={() => applyStatusFilter("available")}
+            aria-pressed={filterStatus === "available"}
+            className={doctorListStyles.filterButton(
+              filterStatus === "available",
+              "emerald"
+            )}
+          >
+            Available
+          </button>
 
-                  <div className={listPageStyles.cardContent}>
-                    <div className={listPageStyles.cardPatientName}>
-                      {a.patient}
-                    </div>
-                    <div className={listPageStyles.cardPatientInfo}>
-                      {a.age} yrs · {a.gender}
-                    </div>
-                    <div className={listPageStyles.cardDoctorInfo}>
-                      <span className={listPageStyles.cardDoctorName}>
-                        {a.doctorName}
-                      </span>
-                    </div>
-                    <div className={listPageStyles.cardSpeciality}>
-                      {a.speciality}
-                    </div>
-                  </div>
-                </header>
+          <button
+            onClick={() => applyStatusFilter("unavailable")}
+            aria-pressed={filterStatus === "unavailable"}
+            className={doctorListStyles.filterButton(
+              filterStatus === "unavailable",
+              "red"
+            )}
+          >
+            Unavailable
+          </button>
+        </div>
+      </header>
 
-                <div className={listPageStyles.dateTimeSection}>
-                  <div className={listPageStyles.dateTimeContainer}>
-                    <Calendar className={listPageStyles.calendarIcon} />
-                    <span className={listPageStyles.dateText}>
-                      {formatDate(a.date)}
-                    </span>
-                    <span className=" sm:inline">:</span>
-                    <span>{formatTimeAMPM(a.time)}</span>
-                  </div>
-                  <div className={listPageStyles.feeText}>₹{a.fee}</div>
-                </div>
-
-                <div className={listPageStyles.contactStatusSection}>
-                  <div className={listPageStyles.phoneContainer}>
-                    <Phone className={listPageStyles.phoneIcon} />
-                    <span className={listPageStyles.phoneNumber}>
-                      {a.mobile}
-                    </span>
-                  </div>
-
-                  <div className={listPageStyles.statusContainer}>
-                    <StatusBadge status={a.status} />
-                    <StatusSelect
-                      appointment={a}
-                      onChange={(s) => updateStatus(a.id, s)}
-                    />
-                  </div>
-                </div>
-
-                <div className={listPageStyles.rescheduleContainer}>
-                  <RescheduleButton
-                    appointment={a}
-                    onReschedule={(d, t) => updateDateTime(a.id, d, t)}
-                  />
-                </div>
-              </article>
-            ))}
+      <main className={doctorListStyles.gridContainer}>
+        {loading && (
+          <div className={doctorListStyles.loadingContainer}>
+            Loading doctors...
           </div>
         )}
-      </div>
+        {!loading && filtered.length === 0 && (
+          <div className={doctorListStyles.noResultsContainer}>
+            No doctors match your search.
+          </div>
+        )}
+
+        {displayed.map((doc) => {
+          const id = doc._id || doc.id;
+          const isOpen = expanded === id;
+          const isAvailable = doc.availability === "Available";
+
+          // build normalized schedule map and sorted date keys
+          const scheduleMap = buildScheduleMap(doc.schedule || {});
+          const sortedDates = getSortedScheduleDates(scheduleMap);
+
+          return (
+            <article key={id} className={doctorListStyles.article}>
+              <div className={doctorListStyles.articleContent}>
+                <img
+                  src={doc.imageUrl || doc.image || ""}
+                  alt={doc.name}
+                  className={doctorListStyles.doctorImage}
+                />
+
+                <div className={doctorListStyles.doctorInfoContainer}>
+                  <div className={doctorListStyles.doctorHeader}>
+                    <div className="min-w-0 w-full">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className={doctorListStyles.doctorName}>
+                          {doc.name}
+                        </h3>
+
+                        <span
+                          className={doctorListStyles.availabilityBadge(
+                            isAvailable
+                          )}
+                        >
+                          <span
+                            className={doctorListStyles.availabilityDot(
+                              isAvailable
+                            )}
+                          />
+                          {isAvailable ? "Available" : "Unavailable"}
+                        </span>
+                      </div>
+
+                      <div className={doctorListStyles.doctorDetails}>
+                        {doc.specialization} • {doc.experience} years
+                      </div>
+                    </div>
+
+                    <div className={doctorListStyles.ratingContainer}>
+                      <div className={doctorListStyles.rating}>
+                        <Star size={14} /> {doc.rating}
+                      </div>
+                      <button
+                        onClick={() => toggle(id)}
+                        aria-expanded={isOpen}
+                        className={doctorListStyles.toggleButton(isOpen)}
+                      >
+                        <EyeClosed size={18} />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className={doctorListStyles.statsContainer}>
+                    <div className={doctorListStyles.statsLabel}>Patients</div>
+                    <div className={doctorListStyles.statsValue}>
+                      <Users size={14} /> {doc.patients}
+                    </div>
+
+                    <div className={doctorListStyles.actionContainer}>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => removeDoctor(id)}
+                          title={`Delete ${doc.name}`}
+                          className={doctorListStyles.deleteButton}
+                        >
+                          <Trash2 size={14} /> Delete
+                        </button>
+
+                        <div className={doctorListStyles.feesLabel}>Fees :</div>
+                        <div className={doctorListStyles.feesValue}>
+                          <BadgeIndianRupee /> {doc.fee}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div
+                className={doctorListStyles.expandableContent}
+                style={{
+                  maxHeight: isOpen ? (isMobileScreen ? 320 : 600) : 0,
+                  transition:
+                    "max-height 420ms cubic-bezier(.2,.9,.2,1), padding 220ms ease",
+                  paddingTop: isOpen ? 16 : 0,
+                  paddingBottom: isOpen ? 16 : 0,
+                }}
+              >
+                {isOpen && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                    <div className={doctorListStyles.aboutSection}>
+                      <h4 className={doctorListStyles.aboutHeading}>About</h4>
+                      <p className={doctorListStyles.aboutText}>{doc.about}</p>
+
+                      <div className="mt-4">
+                        <div className={doctorListStyles.qualificationsHeading}>
+                          Qualifications
+                        </div>
+                        <div className={doctorListStyles.qualificationsText}>
+                          {doc.qualifications}
+                        </div>
+                      </div>
+
+                      <div className="mt-4">
+                        <div className={doctorListStyles.scheduleHeading}>
+                          Schedule
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {sortedDates.map((date) => {
+                            const slots = scheduleMap[date] || [];
+                            return (
+                              <div key={date} className="min-w-full md:min-w-0">
+                                <div className={doctorListStyles.scheduleDate}>
+                                  {formatDateISO(date)}
+                                </div>
+                                <div className="mt-1 flex flex-wrap gap-2">
+                                  {slots.map((s, i) => (
+                                    <span
+                                      key={i}
+                                      className={doctorListStyles.scheduleSlot}
+                                    >
+                                      {s}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+
+                    <aside className={doctorListStyles.statsSidebar}>
+                      <div className={doctorListStyles.statsItemHeading}>
+                        Success
+                      </div>
+                      <div className={doctorListStyles.statsItemValue}>
+                        {doc.success}%
+                      </div>
+
+                      <div className={doctorListStyles.statsItemHeading}>
+                        Patients
+                      </div>
+                      <div className={doctorListStyles.statsItemValue}>
+                        {doc.patients}
+                      </div>
+
+                      <div className={doctorListStyles.statsItemHeading}>
+                        Location
+                      </div>
+                      <div className={doctorListStyles.locationValue}>
+                        {doc.location}
+                      </div>
+                    </aside>
+                  </div>
+                )}
+              </div>
+            </article>
+          );
+        })}
+
+        {filtered.length > 6 && (
+          <div className={doctorListStyles.showMoreContainer}>
+            <button
+              onClick={() => setShowAll((s) => !s)}
+              className={doctorListStyles.showMoreButton}
+            >
+              {showAll ? "Show less" : `Show more (${filtered.length - 4})`}
+            </button>
+          </div>
+        )}
+      </main>
     </div>
   );
 }

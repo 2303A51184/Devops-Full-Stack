@@ -1,13 +1,14 @@
 import React from 'react'
-import ListPage from '../../components/ListPage/ListPage'
 import Navbar from '../../components/Navbar/Navbar'
-const List = () => {
+import AddPage from '../../components/AddPage/AddPage'
+
+const Add = () => {
   return (
     <div>
         <Navbar/>
-        <ListPage/>
+        <AddPage/>
     </div>
   )
 }
 
-export default List
+export default Add
